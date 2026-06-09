@@ -1,20 +1,47 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# dependencies
 node_modules/
 
+# next.js build output
 .next/
 out/
 build/
 
+# testing
 coverage/
 /test-results/
-/prawright-report/
+/playwright-report/
 /blob-report/
 /playwright/.cache/
 
-/.env*
+# env files
+.env*
 !.env.example
 
-.tsbuildinfo
+# typescript
+*.tsbuildinfo
 next-env.d.ts
 
-.vs/
+# misc
+.DS_Store
+*.pem
+.vercel
+.tmp
+
+# debug logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# sonarqube
+.scannerwork/
+
+# editor
+.vscode/
+.idea/
+
+# media uploads
+/cms/public/media/*
+!/cms/public/media/.gitkeep

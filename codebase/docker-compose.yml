@@ -1,0 +1,164 @@
+services:
+  # CMS Service (Payload)
+  cms:
+    build:
+      context: .
+      dockerfile: apps/cms/Dockerfile
+    container_name: webby_cms
+    ports:
+      - '3001:3000'
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./apps/cms:/app/apps/cms
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - ./eslint.config.mjs:/app/eslint.config.mjs:ro
+      - ./.prettierrc.json:/app/.prettierrc.json:ro
+      - cms_node_modules:/app/apps/cms/node_modules
+    env_file:
+      - apps/cms/.env
+    restart: unless-stopped
+
+  # Frontend Service
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+    container_name: webby_frontend
+    ports:
+      - '3000:3000'
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      NEXT_PUBLIC_CMS_URL: http://localhost:3001
+      CMS_GRAPHQL_URL: http://cms:3000
+      NEXT_PUBLIC_SITE_URL: http://localhost:3000
+    depends_on:
+      - cms
+    volumes:
+      - ./apps/frontend:/app/apps/frontend
+      - ./tsconfig.json:/app/tsconfig.json:ro
+      - ./eslint.config.mjs:/app/eslint.config.mjs:ro
+      - ./.prettierrc.json:/app/.prettierrc.json:ro
+      - frontend_node_modules:/app/apps/frontend/node_modules
+    restart: unless-stopped
+
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: webby_postgres
+    env_file:
+      - apps/cms/.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - '5432:5432'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # SonarQube Database
+  sonardb:
+    image: postgres:15-alpine
+    container_name: webby_sonarqube_db
+    environment:
+      POSTGRES_USER: sonarqube
+      POSTGRES_PASSWORD: sonarqube
+      POSTGRES_DB: sonarqube
+    volumes:
+      - sonarqube_db:/var/lib/postgresql/data
+    ports:
+      - '5433:5432'
+    restart: unless-stopped
+
+  # SonarQube for Code Quality
+  sonarqube:
+    image: sonarqube:community
+    container_name: webby_sonarqube
+    depends_on:
+      - sonardb
+    ports:
+      - '9000:9000'
+    environment:
+      SONAR_JDBC_URL: jdbc:postgresql://sonardb:5432/sonarqube
+      SONAR_JDBC_USERNAME: sonarqube
+      SONAR_JDBC_PASSWORD: sonarqube
+    volumes:
+      - sonarqube_data:/opt/sonarqube/data
+      - sonarqube_extensions:/opt/sonarqube/extensions
+      - sonarqube_logs:/opt/sonarqube/logs
+    restart: unless-stopped
+
+  # SonarQube Scanner for CMS
+  scanner-cms:
+    image: sonarsource/sonar-scanner-cli:latest
+    container_name: webby_scanner_cms
+    depends_on:
+      sonarqube:
+        condition: service_started
+    working_dir: /usr/src/apps/cms
+    restart: 'no'
+    profiles:
+      - sonar-scan
+    command: >
+      sh -c "
+      echo 'Waiting for SonarQube to be ready...';
+      for i in $$(seq 1 120); do
+        if curl -fsS http://sonarqube:9000/api/system/status >/dev/null 2>&1; then
+          echo 'SonarQube is reachable. Scanning CMS...';
+          exec sonar-scanner -Dsonar.host.url=http://sonarqube:9000 -Dsonar.token=$${SONAR_TOKEN} -Dsonar.scanner.skipJreProvisioning=true -Dsonar.log.level=WARN;
+        fi;
+        sleep 2;
+      done;
+      echo 'Timed out waiting for SonarQube startup.';
+      exit 1
+      "
+    volumes:
+      - .:/usr/src
+    env_file:
+      - .env
+
+  # SonarQube Scanner for Frontend
+  scanner-frontend:
+    image: sonarsource/sonar-scanner-cli:latest
+    container_name: webby_scanner_frontend
+    depends_on:
+      sonarqube:
+        condition: service_started
+    working_dir: /usr/src/apps/frontend
+    restart: 'no'
+    profiles:
+      - sonar-scan
+    command: >
+      sh -c "
+      echo 'Waiting for SonarQube to be ready...';
+      for i in $$(seq 1 120); do
+        if curl -fsS http://sonarqube:9000/api/system/status >/dev/null 2>&1; then
+          echo 'SonarQube is reachable. Scanning Frontend...';
+          exec sonar-scanner -Dsonar.host.url=http://sonarqube:9000 -Dsonar.token=$${SONAR_TOKEN} -Dsonar.scanner.skipJreProvisioning=true -Dsonar.log.level=WARN;
+        fi;
+        sleep 2;
+      done;
+      echo 'Timed out waiting for SonarQube startup.';
+      exit 1
+      "
+    volumes:
+      - .:/usr/src
+    env_file:
+      - .env
+
+volumes:
+  postgres_data:
+  cms_node_modules:
+  frontend_node_modules:
+  sonarqube_data:
+  sonarqube_extensions:
+  sonarqube_logs:
+  sonarqube_db:
