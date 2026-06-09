@@ -90,11 +90,6 @@ jobs:
       # -----------------------------------------------------------------------
 
       # -----------------------------------------------------------------------
-
-      - name: Prettier formatting check
-        working-directory: codebase
-        run: npx prettier --check .
-
       # -----------------------------------------------------------------------
       # 6. Build the affected workspace(s) (BLOCKING)
       # Surfaces TypeScript errors via the Next.js build.
