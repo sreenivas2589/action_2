@@ -1,0 +1,65 @@
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# Node dependencies
+/node_modules
+/codebase/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# IDEs
+/codebase/.idea
+/codebase/.idea/*
+!/.idea/runConfigurations
+/codebase/.vscode
+
+# Testing and coverage
+/codebase/coverage
+/codebase/test-results/
+/codebase/playwright-report/
+/codebase/blob-report/
+/codebase/playwright/.cache/
+/codebase/.nyc_output
+
+# Next.js, build outputs
+/codebase/.next/
+/codebase/out/
+/codebase/build
+/codebase/dist
+
+# Misc
+.DS_Store
+*.pem
+.cache
+.parcel-cache
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Local env files
+.codebase/.env
+.codebase/.env.local
+.codebase/.env.*.local
+
+# Vercel & hosting
+.codebase/.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Media / uploads
+.codebase/media
+
+# Docker
+.codebase/docker-compose.override.yml
+
+# Playwright
+.codebase/node_modules/
+.codebase/test-results/
+.codebase/playwright-report/
+.codebase/blob-report/
+.codebase/playwright/.cache/
