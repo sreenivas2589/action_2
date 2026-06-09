@@ -88,8 +88,24 @@ jobs:
         run: npm ci
 
       # -----------------------------------------------------------------------
+      # 4. Secret scan (BLOCKING)
+      # -----------------------------------------------------------------------
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # -----------------------------------------------------------------------
+      # 5. Lint & formatting (BLOCKING)
+      # -----------------------------------------------------------------------
+      - name: Lint
+        working-directory: codebase
+        run: npm run lint
+
+      - name: Prettier formatting check
+        working-directory: codebase
+        run: npx prettier --check .
+
       # -----------------------------------------------------------------------
       # 6. Build the affected workspace(s) (BLOCKING)
       # Surfaces TypeScript errors via the Next.js build.
