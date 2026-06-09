@@ -83,6 +83,14 @@ jobs:
       # -----------------------------------------------------------------------
       # 3. Install Dependencies (Deterministic)
       # -----------------------------------------------------------------------
+      - name: Clearing dependencies
+        working-directory: codebase
+        run: rm -rf node_modules package-lock.json
+        
+      - name: Cleaning cache
+        working-directory: codebase
+        run: npm cache clean --force
+        
       - name: Install dependencies
         working-directory: codebase
         run: npm ci
