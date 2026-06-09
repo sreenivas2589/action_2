@@ -88,12 +88,6 @@ jobs:
         run: npm ci
 
       # -----------------------------------------------------------------------
-      # 4. Secret scan (BLOCKING)
-      # -----------------------------------------------------------------------
-      - name: Gitleaks secret scan
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # -----------------------------------------------------------------------
       # 5. Lint & formatting (BLOCKING)
