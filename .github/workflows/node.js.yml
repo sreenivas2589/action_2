@@ -1,0 +1,198 @@
+# -----------------------------------------------------------------------------
+# Workflow Name
+# -----------------------------------------------------------------------------
+
+name: PR Validation – Trunk Quality Gate
+
+on:
+  push:
+    branches:
+      - main
+
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manually triggering PR validation'
+        required: false
+        default: 'Manual PR validation'
+concurrency:
+  group: pr-validation-${{ github.ref }}
+  cancel-in-progress: true        
+
+env:
+  NODE_VERSION: 20.x
+
+jobs:
+  changes:
+    name: Detect changed workspaces
+    runs-on: ubuntu-latest
+    outputs:
+      cms: ${{ steps.filter.outputs.cms }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      root: ${{ steps.filter.outputs.root }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            cms:
+              - 'codebase/apps/cms/**'
+            frontend:
+              - 'codebase/apps/frontend/**'
+            root:
+              - 'codebase/package.json'
+              - 'codebase/package-lock.json'
+              - 'codebase/tsconfig.json'
+              - '.github/workflows/**'
+              
+  pr-validation:
+    name: Quality & Security Validation
+    needs: changes
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      pull-requests: write
+      security-events: write   # for SARIF uploads (gitleaks, trivy)
+
+    
+    defaults:
+      run:
+        working-directory: codebase   # ✅ KEY FIX
+  
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout (full history required for SonarQube blame)
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # -----------------------------------------------------------------------
+      # 2. Set Up Node.js
+      # -----------------------------------------------------------------------
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: codebase/package-lock.json
+
+      # -----------------------------------------------------------------------
+      # 3. Install Dependencies (Deterministic)
+      # -----------------------------------------------------------------------
+      - name: Install dependencies
+        working-directory: codebase
+        run: npm ci
+
+      # -----------------------------------------------------------------------
+      # 4. Secret scan (BLOCKING)
+      # -----------------------------------------------------------------------
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # 5. Lint & formatting (BLOCKING)
+      # -----------------------------------------------------------------------
+      - name: Lint
+        working-directory: codebase
+        run: npm run lint
+
+      - name: Prettier formatting check
+        working-directory: codebase
+        run: npx prettier --check .
+
+      # -----------------------------------------------------------------------
+      # 6. Build the affected workspace(s) (BLOCKING)
+      # Surfaces TypeScript errors via the Next.js build.
+      # -----------------------------------------------------------------------
+      - name: Build CMS
+        if: needs.changes.outputs.cms == 'true' || needs.changes.outputs.root == 'true'
+        working-directory: codebase
+        run: npm run build --workspace=apps/cms
+
+      - name: Build Frontend
+        if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.root == 'true'
+        working-directory: codebase
+        run: npm run build --workspace=apps/frontend
+
+      # -----------------------------------------------------------------------
+      # 7. Unit / integration tests with coverage (BLOCKING)
+      # -----------------------------------------------------------------------
+      - name: Test CMS (Jest)
+        if: needs.changes.outputs.cms == 'true' || needs.changes.outputs.root == 'true'
+        working-directory: codebase
+        run: npm run test --workspace=apps/cms -- --coverage
+        # apps/cms package.json "test" script must invoke: jest --coverage
+
+      - name: Cache Cypress binary
+        if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.root == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('codebase/package-lock.json') }}
+
+      - name: Test Frontend (Cypress component)
+        if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.root == 'true'
+        working-directory: codebase
+        run: npm run test:ct --workspace=apps/frontend
+        # apps/frontend package.json "test:ct" script must invoke:
+        #   cypress run --component --coverage
+        continue-on-error: true   # remove once Cypress component specs exist
+
+      # -----------------------------------------------------------------------
+      # 8. SonarQube PR analysis (MANDATORY)
+      #    One scan per app to match per-workspace sonar-project.properties.
+      # -----------------------------------------------------------------------
+      - name: SonarQube PR analysis — CMS
+        if: needs.changes.outputs.cms == 'true'
+        uses: SonarSource/sonarqube-scan-action@v6
+        with:
+          projectBaseDir: codebase/apps/cms
+          args: >
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
+            -Dsonar.pullrequest.branch=${{ github.head_ref }}
+            -Dsonar.pullrequest.base=${{ github.base_ref }}
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: SonarQube PR analysis — Frontend
+        if: needs.changes.outputs.frontend == 'true'
+        uses: SonarSource/sonarqube-scan-action@v6
+        with:
+          projectBaseDir: codebase/apps/frontend
+          args: >
+            -Dsonar.pullrequest.key=${{ github.event.pull_request.number }}
+            -Dsonar.pullrequest.branch=${{ github.head_ref }}
+            -Dsonar.pullrequest.base=${{ github.base_ref }}
+          env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+            
+      # -----------------------------------------------------------------------
+      # 9 Dependency vulnerability scan (SCA — BLOCKING on HIGH/CRITICAL)
+      # Pinned to a tagged release — do NOT use @main.------
+      - name: OWASP dependency check
+        uses: dependency-check/Dependency-Check_Action@1.1.0
+        with:
+          project: webby-monorepo
+          path: codebase
+          format: 'HTML'
+          args: >
+            --failOnCVSS 7
+            --enableRetired
+
+      # -----------------------------------------------------------------------
+      # 10. Upload Dependency Report (Always)
+      # -----------------------------------------------------------------------
+      - name: Upload dependency scan report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-check-report
+          path: reports/
